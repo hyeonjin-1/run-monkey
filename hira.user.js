@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         🐵 칼퇴몽키 – 심평원용
 // @namespace    wellcheck-hira-automation
-// @version      1.8
+// @version      1.9
 // @description  클릭은 몽키가, 퇴근은 내가 · 웰체크에서 심평원 이동 후 작성완료 자동 클릭 (교육상담: 마지막 행 체크 후 / 포괄평가: 바로)
 // @match        https://biz.hira.or.kr/*
 // @updateURL    https://raw.githubusercontent.com/hyeonjin-1/run-monkey/main/hira.user.js
@@ -16,6 +16,49 @@
 
   // 페이지 환경에서 직접 실행하므로 창은 window 그대로 사용
   const PAGE = window;
+
+  // ---- 새 버전 알림: GitHub에 올라간 버전이 더 높으면 화면 왼쪽 아래에 알림 카드를 띄움 ----
+  // 버전 숫자만 읽어 오고, 화면의 정보는 어디로도 보내지 않음
+  (function kaltoeUpdateNotice(cfg) {
+    try {
+      if (window.top !== window.self) return; // 맨 바깥 화면에서만
+      const cur = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || cfg.fallback;
+      const newer = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < Math.max(x.length, y.length); i++) { const d = (x[i] || 0) - (y[i] || 0); if (d) return d > 0; } return false; };
+      const key = 'kaltoe-upd-' + cfg.id;
+      const getText = (url) => new Promise((res, rej) => {
+        if (typeof GM_xmlhttpRequest === 'function') {
+          GM_xmlhttpRequest({ method: 'GET', url, headers: { 'Cache-Control': 'no-cache' }, timeout: 8000, onload: (r) => (r.status === 200 ? res(r.responseText) : rej(r.status)), onerror: rej, ontimeout: rej });
+        } else fetch(url, { cache: 'no-store' }).then((r) => (r.ok ? r.text() : Promise.reject(r.status))).then(res, rej);
+      });
+      setTimeout(() => {
+        getText(cfg.url + '?t=' + Date.now()).then((txt) => {
+          const m = /@version\s+([\d.]+)/.exec(txt || '');
+          if (!m || !newer(m[1], cur)) return;
+          const latest = m[1];
+          try { const sn = JSON.parse(localStorage.getItem(key) || 'null'); if (sn && sn.v === latest && Date.now() < sn.until) return; } catch (e) {}
+          if (document.getElementById('kaltoe-upd-card-' + cfg.id)) return;
+          const c = document.createElement('div');
+          c.id = 'kaltoe-upd-card-' + cfg.id;
+          c.style.cssText = 'position:fixed;left:8px;bottom:' + (cfg.bottom || 70) + 'px;z-index:2147483646;width:280px;background:#fff;color:#222;border:2px solid #ef6c00;border-radius:12px;padding:12px 14px;box-shadow:0 4px 16px rgba(0,0,0,.2);font:13px/1.5 "Malgun Gothic",sans-serif';
+          c.innerHTML = '<div style="font-weight:700;font-size:14px;margin-bottom:4px">🐵 ' + cfg.title + ' 새 버전이 나왔어요</div>' +
+            '<div style="color:#666;margin-bottom:10px">지금 v' + cur + ' → 새 버전 v' + latest + '</div>' +
+            '<div style="display:flex;gap:6px"><button type="button" data-a="go" style="flex:1;background:#ef6c00;color:#fff;border:0;border-radius:6px;padding:6px;cursor:pointer;font-weight:700">지금 업데이트</button>' +
+            '<button type="button" data-a="later" style="background:#fff;border:1px solid #bbb;border-radius:6px;padding:6px 10px;cursor:pointer">나중에</button></div>';
+          c.addEventListener('click', (e) => {
+            const a = e.target && e.target.getAttribute('data-a');
+            if (a === 'go') {
+              window.open(cfg.url, '_blank'); // Tampermonkey 덮어쓰기(Overwrite) 화면이 열림
+              c.querySelector('div:nth-child(2)').textContent = '새 탭에서 Overwrite(덮어쓰기)를 누른 뒤 이 화면을 새로고침해 주세요.';
+            } else if (a === 'later') {
+              try { localStorage.setItem(key, JSON.stringify({ v: latest, until: Date.now() + 24 * 3600 * 1000 })); } catch (e2) {}
+              c.remove();
+            }
+          });
+          (document.body || document.documentElement).appendChild(c);
+        }).catch(() => {}); // 확인 실패(인터넷·보안 설정)는 조용히 넘어감
+      }, cfg.delay || 3000);
+    } catch (e) {}
+  })({ id: 'hira', title: '칼퇴몽키 심평원용', url: 'https://raw.githubusercontent.com/hyeonjin-1/run-monkey/main/hira.user.js', fallback: '1.9', bottom: 40, delay: 1500 });
 
   function realClick(el) {
     if (!el) return false;
@@ -293,7 +336,7 @@
 
   // 최상위 창에서만 실행
   if (window.top === window.self) {
-    badge('심평원 자동화 v1.8 시작');
+    badge('심평원 자동화 v1.9 시작');
     startHira();
   }
 })();
