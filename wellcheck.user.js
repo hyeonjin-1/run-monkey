@@ -1,13 +1,15 @@
 // ==UserScript==
 // @name         🐵 칼퇴몽키 – 웰체크용
 // @namespace    wellcheck-hira-automation
-// @version      11.3
+// @version      11.4
 // @description  클릭은 몽키가, 퇴근은 내가 · 웰체크 교육상담·포괄평가·점검평가 대기열 자동화(심평원 작성완료는 별도 스크립트). SPA 페이지 이동 감지 포함.
 // @match        https://web.well-check.co.kr/*
 // @updateURL    https://raw.githubusercontent.com/hyeonjin-1/run-monkey/main/wellcheck.user.js
 // @downloadURL  https://raw.githubusercontent.com/hyeonjin-1/run-monkey/main/wellcheck.user.js
 // @run-at       document-idle
 // @grant        unsafeWindow
+// @grant        GM_xmlhttpRequest
+// @connect      raw.githubusercontent.com
 // @require      https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js
 // ==/UserScript==
 
@@ -18,6 +20,50 @@
   const PAGE = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
   const ADMIN = false; // 관리자용(점검·화면 변경 감지)은 true
   const GM_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '';
+
+  // ---- 새 버전 알림: GitHub에 올라간 버전이 더 높으면 화면 왼쪽 아래에 알림 카드를 띄움 ----
+  // 버전 숫자만 읽어 오고, 화면의 정보는 어디로도 보내지 않음
+  (function kaltoeUpdateNotice(cfg) {
+    try {
+      if (window.top !== window.self) return; // 맨 바깥 화면에서만
+      if (typeof ADMIN !== 'undefined' && ADMIN) return; // 관리자용은 GitHub에 없으므로 알림 안 함
+      const cur = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || cfg.fallback;
+      const newer = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < Math.max(x.length, y.length); i++) { const d = (x[i] || 0) - (y[i] || 0); if (d) return d > 0; } return false; };
+      const key = 'kaltoe-upd-' + cfg.id;
+      const getText = (url) => new Promise((res, rej) => {
+        if (typeof GM_xmlhttpRequest === 'function') {
+          GM_xmlhttpRequest({ method: 'GET', url, headers: { 'Cache-Control': 'no-cache' }, timeout: 8000, onload: (r) => (r.status === 200 ? res(r.responseText) : rej(r.status)), onerror: rej, ontimeout: rej });
+        } else fetch(url, { cache: 'no-store' }).then((r) => (r.ok ? r.text() : Promise.reject(r.status))).then(res, rej);
+      });
+      setTimeout(() => {
+        getText(cfg.url + '?t=' + Date.now()).then((txt) => {
+          const m = /@version\s+([\d.]+)/.exec(txt || '');
+          if (!m || !newer(m[1], cur)) return;
+          const latest = m[1];
+          try { const sn = JSON.parse(localStorage.getItem(key) || 'null'); if (sn && sn.v === latest && Date.now() < sn.until) return; } catch (e) {}
+          if (document.getElementById('kaltoe-upd-card-' + cfg.id)) return;
+          const c = document.createElement('div');
+          c.id = 'kaltoe-upd-card-' + cfg.id;
+          c.style.cssText = 'position:fixed;left:8px;bottom:' + (cfg.bottom || 70) + 'px;z-index:2147483646;width:280px;background:#fff;color:#222;border:2px solid #ef6c00;border-radius:12px;padding:12px 14px;box-shadow:0 4px 16px rgba(0,0,0,.2);font:13px/1.5 "Malgun Gothic",sans-serif';
+          c.innerHTML = '<div style="font-weight:700;font-size:14px;margin-bottom:4px">🐵 ' + cfg.title + ' 새 버전이 나왔어요</div>' +
+            '<div style="color:#666;margin-bottom:10px">지금 v' + cur + ' → 새 버전 v' + latest + '</div>' +
+            '<div style="display:flex;gap:6px"><button type="button" data-a="go" style="flex:1;background:#ef6c00;color:#fff;border:0;border-radius:6px;padding:6px;cursor:pointer;font-weight:700">지금 업데이트</button>' +
+            '<button type="button" data-a="later" style="background:#fff;border:1px solid #bbb;border-radius:6px;padding:6px 10px;cursor:pointer">나중에</button></div>';
+          c.addEventListener('click', (e) => {
+            const a = e.target && e.target.getAttribute('data-a');
+            if (a === 'go') {
+              window.open(cfg.url, '_blank'); // Tampermonkey 덮어쓰기(Overwrite) 화면이 열림
+              c.querySelector('div:nth-child(2)').textContent = '새 탭에서 Overwrite(덮어쓰기)를 누른 뒤 이 화면을 새로고침해 주세요.';
+            } else if (a === 'later') {
+              try { localStorage.setItem(key, JSON.stringify({ v: latest, until: Date.now() + 24 * 3600 * 1000 })); } catch (e2) {}
+              c.remove();
+            }
+          });
+          (document.body || document.documentElement).appendChild(c);
+        }).catch(() => {}); // 확인 실패(인터넷·보안 설정)는 조용히 넘어감
+      }, cfg.delay || 3000);
+    } catch (e) {}
+  })({ id: 'wellcheck', title: '칼퇴몽키', url: 'https://raw.githubusercontent.com/hyeonjin-1/run-monkey/main/wellcheck.user.js', fallback: '11.4', bottom: 70 });
 
   // ---- 모드: 심평원까지 / 임시저장까지만 ----
   const MODE_KEY = 'kaltoe-mode';
@@ -329,7 +375,7 @@
       const checkedNow = materialCheckboxes(true).length;
 
       badge(
-        'v11.3 · 선택된 자료 ' + checkedNow + '개 · 교육자료 발송 버튼 ' +
+        'v11.4 · 선택된 자료 ' + checkedNow + '개 · 교육자료 발송 버튼 ' +
         (findByText(['button'], '교육자료 발송') ? '있음' : '없음') + ' · ' + lastEvent
       );
 
@@ -974,7 +1020,7 @@
       'z-index:2147483000;background:#fff;color:#222;border:1px solid #888;border-radius:8px;' +
       'box-shadow:0 4px 16px rgba(0,0,0,.25);font:12px/1.5 sans-serif;padding:8px;display:none;';
     panel.innerHTML =
-      '<div style="font-weight:700;margin-bottom:0">🐵 칼퇴몽키 · 교육상담 v11.3 <span id="wcq-count"></span>' +
+      '<div style="font-weight:700;margin-bottom:0">🐵 칼퇴몽키 · 교육상담 v11.4 <span id="wcq-count"></span>' +
       '<span id="wcq-min" style="float:right;cursor:pointer;padding:0 6px">−</span></div>' +
       '<div style="color:#777;font-size:11px;margin-bottom:4px">클릭은 몽키가, 퇴근은 내가</div>' +
       '<div id="wcq-body">' + MODE_ROW('wcq') +
@@ -2371,7 +2417,7 @@
         'z-index:2147483000;background:#fff;color:#222;border:1px solid #888;border-radius:8px;' +
         'box-shadow:0 4px 16px rgba(0,0,0,.25);font:12px/1.5 sans-serif;padding:8px;display:none;';
       pp.innerHTML =
-        '<div style="font-weight:700;margin-bottom:0"><span id="wcp-title">🐵 칼퇴몽키 · 포괄평가 v11.3</span> <span id="wcp-count"></span>' +
+        '<div style="font-weight:700;margin-bottom:0"><span id="wcp-title">🐵 칼퇴몽키 · 포괄평가 v11.4</span> <span id="wcp-count"></span>' +
         '<span id="wcp-min" style="float:right;cursor:pointer;padding:0 6px">−</span></div>' +
         '<div style="color:#777;font-size:11px;margin-bottom:4px">클릭은 몽키가, 퇴근은 내가</div>' +
         '<div id="wcp-body">' + MODE_ROW('wcp') +
@@ -2532,7 +2578,7 @@
         pItems = store[task].items;
         pq('#wcp-text').value = store[task].text;
         const isA = t === 'assess';
-        pq('#wcp-title').textContent = '🐵 칼퇴몽키 · ' + (isA ? '점검평가' : '포괄평가') + ' v11.3';
+        pq('#wcp-title').textContent = '🐵 칼퇴몽키 · ' + (isA ? '점검평가' : '포괄평가') + ' v11.4';
         pq('#wcp-text').placeholder = isA
           ? '이름,생년월일,점검평가일자(AX003 처방일) (쉼표·탭·공백 가능)\n홍길동,960824,2026-09-28'
           : '이름,생년월일,계획수립일자 (쉼표·탭·공백 가능)\n홍길동,960824,2026-09-28';
